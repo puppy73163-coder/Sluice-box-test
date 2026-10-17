@@ -1,0 +1,84 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sluice Box — Fluid Dynamics Lab</title><style>body{margin:0;background:#101923;color:#eaf3fa;font:16px system-ui}header{padding:16px;background:#192a39}h1{margin:0}.layout{display:grid;grid-template-columns:260px minmax(0,1fr);gap:14px;padding:14px}aside{background:#1b2b3a;border-radius:12px;padding:15px}label{display:block;margin-top:12px}input[type=range]{width:100%}button{background:#2479a6;color:white;border:0;border-radius:8px;padding:11px;margin:5px 4px 5px 0;font-size:15px}button:active{background:#d39b33}canvas{display:block;width:100%;height:auto;touch-action:none;background:#102638;border-radius:10px}#health{background:#233d49;padding:12px;border-radius:8px;margin:12px 0}#stats{padding:10px;line-height:1.6}p{color:#b6cbd8}@media(max-width:760px){.layout{grid-template-columns:1fr}}</style></head><body><header><h1>⛏️ Sluice Box</h1><div>Riffle designer & fluid-flow experiment</div></header><div class="layout"><aside><strong>Riffle tools</strong><p>Tap inside the sluice to add a riffle. Drag a riffle to move it.</p><button id="add">Add riffle</button><button id="erase">Erase riffle</button><button id="clear">Clear riffles</button><label for="shape">Riffle shape</label><select id="shape" style="width:100%;padding:11px;background:#102638;color:white;border:1px solid #7895a2;border-radius:8px"><option value="straight">Straight bar</option><option value="forward">Forward angled</option><option value="backward">Backward angled</option><option value="hungarian">Hungarian</option><option value="v">V-shaped pocket</option><option value="round">Rounded hump</option></select><button id="apply">Apply shape to selected riffle</button><div id="selection">Tap a riffle to select it; drag to reposition.</div><label>Spacing from previous riffle <output id="gapVal">170</output> px</label><input id="gap" type="range" min="15" max="350" value="170"><button id="applyGap">Apply spacing to selected riffle</button><label>Uniform spacing <output id="uniformVal">170</output> px</label><input id="uniform" type="range" min="25" max="240" value="170"><button id="spaceAll">Space all riffles evenly</button><p>Spacing is measured horizontally between riffle anchor points. Select a riffle to adjust its gap from the preceding riffle.</p><label>Riffle height <output id="heightVal">24</output></label><input id="height" type="range" min="8" max="70" value="24"><label>Riffle angle <output id="angleVal">0</output>°</label><input id="angle" type="range" min="-40" max="40" value="0"><hr><strong>Water settings</strong><label>Water flow <output id="flowVal">100</output> GPM</label><input id="flow" type="range" min="10" max="300" step="5" value="100"><label>Water depth <output id="depthVal">1.0</output> inches</label><input id="depth" type="range" min="0.5" max="3" step="0.25" value="1"><div id="hydraulics" style="margin:10px 0;padding:10px;background:#102638;border-radius:8px;color:#bde8f8"></div><label>Sluice slope <output id="slopeVal">5</output>°</label><input id="slope" type="range" min="0" max="20" value="5"><label>Turbulence <output id="turbVal">30</output></label><input id="turb" type="range" min="0" max="100" value="30"><p><label><input type="checkbox" id="gold" checked> Heavy / gold</label><label><input type="checkbox" id="black" checked> Medium / black sand</label><label><input type="checkbox" id="sand" checked> Light / sand</label></p><button id="start">▶ Run</button><button id="feed">+ Feed particles</button><button id="reset">Reset particles</button></aside><main><div id="health">Starting simulator…</div><canvas id="c" width="1000" height="490">Your browser cannot display the canvas.</canvas><div id="stats"></div><p>Yellow: heavy • Purple: medium • Blue: light. Riffle profiles influence simplified eddies and particle collisions. 2D reduced-order flow field: boundary layer, recirculation vortices and particle drag; not validated CFD or a recovery prediction. GPM uses 12-inch width and selected average depth.</p></main></div><script>
+(function(){
+'use strict';
+var health=document.getElementById('health');
+window.onerror=function(message){health.textContent='JavaScript error: '+message;return false;};
+try {
+var canvas=document.getElementById('c');var ctx=canvas.getContext('2d');if(!ctx)throw Error('Canvas unavailable');
+function el(id){return document.getElementById(id)}function val(id){return Number(el(id).value)}
+var riffles=[230,400,570,740].map(function(x){return{x:x,h:24,a:0,shape:"straight"}}), particles=[], escaped=[0,0,0],running=false,mode='add',drag=-1,selected=-1,last=0,frameCount=0;
+var floorY=415,waterTop=90,colors=['#ffd44d','#ae86d9','#b9e6ec'];
+['height','angle','flow','depth','slope','turb','gap','uniform'].forEach(function(id){el(id).addEventListener('input',function(){el(id+'Val').textContent=el(id).value;});});
+function sortedRiffles(){return riffles.slice().sort(function(a,b){return a.x-b.x})}
+function showGap(){if(selected<0||!riffles[selected])return;var sorted=sortedRiffles(),i=sorted.indexOf(riffles[selected]);if(i>0){var gap=Math.round(sorted[i].x-sorted[i-1].x);el('gap').value=Math.max(15,Math.min(350,gap));el('gapVal').textContent=gap;el('selection').textContent='Selected riffle '+(i+1)+' of '+sorted.length+'; previous gap '+gap+' px';}else{el('selection').textContent='First riffle selected (no previous gap).';}}
+el('applyGap').onclick=function(){if(selected<0||!riffles[selected]){health.textContent='Select a riffle first.';return}var sorted=sortedRiffles(),i=sorted.indexOf(riffles[selected]);if(i===0){health.textContent='First riffle has no preceding riffle. Select another.';return}var target=sorted[i-1].x+val('gap');if(target>980){health.textContent='Not enough room at the end of the sluice.';return}riffles[selected].x=target;showGap();health.textContent='Selected riffle spacing updated.'};
+el('spaceAll').onclick=function(){var sorted=sortedRiffles(),spacing=val('uniform');if(!sorted.length)return;var start=Math.max(25,Math.min(sorted[0].x,980-(sorted.length-1)*spacing));if(start+(sorted.length-1)*spacing>980){health.textContent='Too many riffles for this spacing. Reduce spacing.';return}sorted.forEach(function(r,i){r.x=start+i*spacing});showGap();health.textContent='Applied '+spacing+' px uniform spacing.'};
+el('apply').onclick=function(){if(selected<0||!riffles[selected]){health.textContent='Tap an existing riffle first.';return}riffles[selected].shape=el('shape').value;riffles[selected].h=val('height');riffles[selected].a=val('angle');health.textContent='Selected riffle updated.'};el('add').onclick=function(){mode='add';health.textContent='Tap the water to add riffles.'};el('erase').onclick=function(){mode='erase';health.textContent='Tap a riffle to erase it.'};el('clear').onclick=function(){riffles=[];selected=-1;health.textContent='Riffles cleared.'};
+el('start').onclick=function(){running=!running;el('start').textContent=running?'⏸ Pause':'▶ Run';health.textContent=running?'Simulation running.':'Simulation paused.'};
+el('reset').onclick=function(){particles=[];escaped=[0,0,0];health.textContent='Particles reset.'};
+function feed(){var kinds=[0,1,2].filter(function(k){return el(['gold','black','sand'][k]).checked});if(!kinds.length){health.textContent='Select a particle type.';return}for(var i=0;i<90;i++){particles.push({x:15+Math.random()*65,y:waterTop+25+Math.random()*(floorY-waterTop-60),vx:0,vy:0,k:kinds[i%kinds.length]})}health.textContent='90 particles added.'}
+el('feed').onclick=feed;
+function position(e){var r=canvas.getBoundingClientRect();return{x:(e.clientX-r.left)*canvas.width/r.width,y:(e.clientY-r.top)*canvas.height/r.height}}
+canvas.addEventListener('pointerdown',function(e){var p=position(e);if(p.y<waterTop||p.y>floorY+15)return;var i=riffles.findIndex(function(r){return Math.abs(r.x-p.x)<16&&p.y>floorY-r.h-15});if(mode==='erase'){if(i>=0){riffles.splice(i,1);selected=-1}}else if(i>=0){selected=i;el('shape').value=riffles[i].shape||'straight';el('height').value=riffles[i].h;el('heightVal').textContent=riffles[i].h;drag=i;showGap();if(canvas.setPointerCapture)canvas.setPointerCapture(e.pointerId)}else {riffles.push({x:p.x,h:val('height'),a:val('angle'),shape:el('shape').value});selected=riffles.length-1;showGap()}});
+canvas.addEventListener('pointermove',function(e){if(drag>=0&&riffles[drag])riffles[drag].x=Math.max(20,Math.min(980,position(e).x))});canvas.addEventListener('pointerup',function(){if(drag>=0)showGap();drag=-1});canvas.addEventListener('pointercancel',function(){drag=-1});
+function profile(r){var h=r.h,angle=r.a*Math.PI/180,lean=h*Math.tan(angle),shape=r.shape||'straight';if(shape==='forward')return [[0,0],[lean+h*.65,-h]];if(shape==='backward')return [[0,0],[lean-h*.65,-h]];if(shape==='hungarian')return [[-8,0],[-8+lean*.3,-h*.8],[14+lean,-h],[24+lean,-h*.85]];if(shape==='v')return [[-h*.65,0],[0,-h],[h*.65,0]];if(shape==='round'){var a=[];for(var i=0;i<=12;i++){var u=i/12;a.push([(u-.5)*h*1.7,-h*Math.sin(Math.PI*u)])}return a}return [[0,0],[lean,-h]]}
+function waterSpeed(){return val('flow')/(448.831*val('depth')/12)}
+// Reduced-order fluid dynamics: divergence-free vortex velocity from a Gaussian
+// streamfunction, superimposed on a near-bed boundary-layer profile.
+// The vortices depend on the actual riffle geometry and hydraulic conditions.
+function fluidAt(x,y,now){
+ var speed=waterSpeed(),depth=val('depth'),turb=val('turb')/100;
+ var h=Math.max(0,Math.min(1,(floorY-y)/(floorY-waterTop)));
+ var u=(.25+.95*Math.pow(h,.36))*speed, v=0;
+ var time=now*.001;
+ riffles.forEach(function(r){
+   var shape=r.shape||'straight';
+   var extent=shape==='hungarian'?4.2:shape==='v'?3.8:shape==='round'?2.7:3.3;
+   var rx=Math.max(18,r.h*extent),ry=Math.max(14,r.h*1.3);
+   var cx=r.x+rx*.48,cy=floorY-Math.min(r.h*.8,90);
+   var X=(x-cx)/rx,Y=(y-cy)/ry;
+   var e=Math.exp(-2.4*(X*X+Y*Y));
+   var strength=(shape==='hungarian'?1.2:shape==='round'?.65:1)*(.45+speed*.28)*Math.min(1.5,r.h/22);
+   // u = d(psi)/dy, v = -d(psi)/dx: localized rotational flow.
+   u+=strength*(-4.8*Y/ry)*e*rx*.20;
+   v+=strength*(4.8*X/rx)*e*ry*.20;
+   // wake slows down as the jet crosses the riffle.
+   if(x>r.x && x<r.x+rx*1.4 && y>floorY-r.h*2.2)u-=speed*.32*e;
+ });
+ var wave=Math.sin(x*.024-time*(.7+speed*.2)+y*.038);
+ v+=turb*.15*wave;
+ u+=turb*.10*Math.cos(x*.017+time*.8+y*.023);
+ return {u:u,v:v};
+}
+function update(dt,now){
+ var speed=waterSpeed(),slope=val('slope')/20,turb=val('turb')/100;
+ particles.forEach(function(p){
+   var flow=fluidAt(p.x,p.y,now);
+   var response=[.045,.09,.17][p.k];
+   p.vx+=(flow.u-p.vx)*Math.min(1,dt*response);
+   var settling=[.21,.115,.053][p.k]*(1+slope*.15);
+   p.vy+=(flow.v+settling-p.vy)*Math.min(1,dt*response*.7);
+   p.vx+=(Math.random()-.5)*turb*.028*dt;
+   p.vy+=(Math.random()-.5)*turb*.028*dt;
+   p.x+=p.vx*dt*.8;p.y+=p.vy*dt*.8;
+   if(p.y>floorY-5){p.y=floorY-5;p.vy=0;p.vx*=[.48,.75,.92][p.k]}
+   if(p.y<waterTop+5){p.y=waterTop+5;p.vy=Math.abs(p.vy)}
+   riffles.forEach(function(r){var pts=profile(r);for(var i=1;i<pts.length;i++){
+     var a=pts[i-1],b=pts[i],ax=r.x+a[0],ay=floorY+a[1],bx=r.x+b[0],by=floorY+b[1];
+     var vx=bx-ax,vy=by-ay,den=vx*vx+vy*vy;if(!den)continue;
+     var q=Math.max(0,Math.min(1,((p.x-ax)*vx+(p.y-ay)*vy)/den));
+     var cx=ax+q*vx,cy=ay+q*vy,dx=p.x-cx,dy=p.y-cy;
+     if(dx*dx+dy*dy<49){p.x=cx-7;p.vx=Math.min(0,p.vx*.15);p.vy-=.12;break}
+   }});
+   if(p.x>1010){escaped[p.k]++;p.dead=true}
+ });
+ particles=particles.filter(function(p){return !p.dead});
+}
+function draw(now){ctx.clearRect(0,0,1000,490);var grad=ctx.createLinearGradient(0,waterTop,0,floorY);grad.addColorStop(0,'#216b94');grad.addColorStop(1,'#123b59');ctx.fillStyle=grad;ctx.fillRect(0,waterTop,1000,floorY-waterTop);ctx.fillStyle='#7895a2';ctx.fillRect(0,floorY,1000,22);ctx.fillStyle='#83d4f0';ctx.fillRect(0,waterTop,1000,4);ctx.strokeStyle='rgba(140,220,245,.32)';ctx.lineWidth=1.5;for(var y=waterTop+25;y<floorY;y+=31){ctx.beginPath();for(var x=0;x<=1000;x+=15){var yy=y+Math.sin(x*.024-now*.00045*waterSpeed()+y)*4;if(x===0)ctx.moveTo(x,yy);else ctx.lineTo(x,yy)}ctx.stroke()}
+// Flow direction arrows make the velocity field and reverse eddies visible.
+for(var yy=waterTop+22;yy<floorY-8;yy+=47){for(var xx=36;xx<1000;xx+=58){var f=fluidAt(xx,yy,now),mag=Math.hypot(f.u,f.v),scale=5/Math.max(.4,mag);var dx=f.u*scale,dy=f.v*scale;ctx.strokeStyle='rgba(155,234,252,.47)';ctx.lineWidth=1.2;ctx.beginPath();ctx.moveTo(xx-dx*.5,yy-dy*.5);ctx.lineTo(xx+dx*.5,yy+dy*.5);ctx.stroke();}}riffles.forEach(function(r,i){var pts=profile(r);ctx.strokeStyle=i===selected?'#ffcc6a':'#d6dfe3';ctx.lineWidth=10;ctx.lineCap='round';ctx.lineJoin='round';ctx.beginPath();pts.forEach(function(pt,j){if(j===0)ctx.moveTo(r.x+pt[0],floorY+pt[1]);else ctx.lineTo(r.x+pt[0],floorY+pt[1])});ctx.stroke();ctx.strokeStyle='#637e8b';ctx.lineWidth=2;ctx.stroke()});particles.forEach(function(p){ctx.fillStyle=colors[p.k];ctx.beginPath();ctx.arc(p.x,p.y,[3.6,2.9,2.3][p.k],0,Math.PI*2);ctx.fill()});ctx.fillStyle='#e9f4fc';ctx.font='18px system-ui';ctx.fillText('FEED →',20,62);ctx.fillText('→ TAILINGS',835,62);var held=[0,1,2].map(function(k){return particles.filter(function(p){return p.k===k}).length});el('hydraulics').textContent='12 in wide • '+val('flow')+' GPM • '+val('depth').toFixed(2)+' in deep • average speed '+waterSpeed().toFixed(2)+' ft/s';el('stats').textContent='In sluice: Heavy '+held[0]+' | Medium '+held[1]+' | Light '+held[2]+'   •   Escaped: '+escaped.join(' / ')+'   •   Riffles: '+riffles.length}
+function frame(now){try{var dt=Math.min(2.5,(now-last)/16.67||1);last=now;if(running)update(dt,now);draw(now);frameCount++;if(frameCount===2)health.textContent='✓ Simulator loaded. Tap Run to start.';requestAnimationFrame(frame)}catch(e){health.textContent='Animation error: '+e.message}}
+feed();draw(0);health.textContent='✓ Simulator loaded. Tap Run to start.';requestAnimationFrame(frame);
+}catch(e){health.textContent='Startup error: '+e.message}
+})();
+</script></body></html>
